@@ -300,7 +300,7 @@
           <div class="bg-white rounded-2xl p-4 border border-peya-grey shadow-sm flex flex-col justify-between">
             <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">OL CF (Customer Facing)</span>
             <div class="my-2">
-              <span id="kpi-olcf-test" class="text-2xl font-extrabold text-[#04ADDF] block">--</span>
+              <span id="kpi-olcf-test" class="text-2xl font-extrabold text-peya-navy block">--</span>
               <span id="kpi-olcf-l4w" class="text-[11px] text-slate-400 font-medium">L4W: --</span>
             </div>
             <div id="kpi-olcf-var" class="mt-1"></div>
@@ -792,7 +792,8 @@
             '</div>';
         }
         
-        const shareCheckboxHTML = '<label class="flex items-center gap-1 text-[11px] font-bold text-slate-500 cursor-pointer select-none border border-slate-200 px-2 py-1 rounded-xl hover:bg-slate-50 transition">' +
+        const shareCheckboxHTML = (metadata.id === 'contact-rate') ? '' :
+          '<label class="flex items-center gap-1 text-[11px] font-bold text-slate-500 cursor-pointer select-none border border-slate-200 px-2 py-1 rounded-xl hover:bg-slate-50 transition">' +
           '<input type="checkbox" id="chk-share-' + metadata.id + '" onchange="toggleShareCurve(\'' + metadata.id + '\')" class="accent-peya-red"> Share %' +
           '</label>';
 
@@ -1408,6 +1409,22 @@
         splitTitleEl.textContent = (temporalGrouping === 'day') ? 'Evolución Diaria DoD (% Split y % Split Cash)' : 'Evolución Semanal WoW (% Split y % Split Cash)';
       }
 
+      // Contact Rate metrics update (CR Total sigue filtro de pago; CR Cash IGNORA filtro de pago)
+      const valCrTest = document.getElementById('val-contact-rate-test');
+      const valCrL4w = document.getElementById('val-contact-rate-l4w');
+      const valCrCashTest = document.getElementById('val-contact-rate-cash-test');
+      const valCrCashL4w = document.getElementById('val-contact-rate-cash-l4w');
+
+      if (valCrTest) valCrTest.textContent = formatValue(testAgg.contact_rate, 'percentage', isTestEmpty);
+      if (valCrL4w) valCrL4w.textContent = formatValue(l4wAgg.contact_rate, 'percentage', isTestEmpty);
+      if (valCrCashTest) valCrCashTest.textContent = formatValue(splitTestAgg.contact_rate_cash, 'percentage', isSplitTestEmpty);
+      if (valCrCashL4w) valCrCashL4w.textContent = formatValue(splitL4wAgg.contact_rate_cash, 'percentage', isSplitL4wEmpty);
+
+      const crTitleEl = document.getElementById('wow-title-contact-rate');
+      if (crTitleEl) {
+        crTitleEl.textContent = (temporalGrouping === 'day') ? 'Evolución Diaria DoD (% CR Total y % CR Cash)' : 'Evolución Semanal WoW (% CR Total y % CR Cash)';
+      }
+
       // Grouping by Date or Week on the fly
       const timeGroups = {};
       baseFiltered.forEach(r => {
@@ -1842,11 +1859,13 @@
         
         const crPointBorders = sortedTimeGroups.map(w => w.isTest ? '#EA044E' : '#94A3B8');
         const crPointBgs = sortedTimeGroups.map(w => w.isTest ? '#EA044E' : '#FFFFFF');
-        const cashPointBorders = sortedTimeGroups.map(w => w.isTest ? '#04ADDF' : '#94A3B8');
-        const cashPointBgs = sortedTimeGroups.map(w => w.isTest ? '#04ADDF' : '#FFFFFF');
+        const cashPointBorders = currentSplitSortedTimeGroups.map(w => w.isTest ? '#04ADDF' : '#94A3B8');
+        const cashPointBgs = currentSplitSortedTimeGroups.map(w => w.isTest ? '#04ADDF' : '#FFFFFF');
 
+        // Total Contact Rate: respeta el filtro de pago seleccionado
         const crTotalData = sortedTimeGroups.map(w => calculateMetricsForSet(w.records).contact_rate);
-        const crCashData = sortedTimeGroups.map(w => calculateMetricsForSet(w.records).contact_rate_cash);
+        // Cash Contact Rate: IGNORA el filtro de pago (se calcula sobre universo total de órdenes Cash)
+        const crCashData = currentSplitSortedTimeGroups.map(w => calculateMetricsForSet(w.records).contact_rate_cash);
 
         const activeDatasets = [
           {
@@ -1877,7 +1896,7 @@
             pointBorderColor: cashPointBorders,
             pointBackgroundColor: cashPointBgs,
             pointBorderWidth: 2,
-            pointRadius: sortedTimeGroups.map(w => w.isTest ? 6 : 4),
+            pointRadius: currentSplitSortedTimeGroups.map(w => w.isTest ? 6 : 4),
             segment: {
               borderColor: ctx => isCrTest[ctx.p1DataIndex] ? '#04ADDF' : '#94A3B8'
             },
@@ -2234,15 +2253,21 @@
         const l4wCrCashData = [];
         
         afvBuckets.forEach(b => {
+          // Total: respeta el filtro de pago seleccionado
           const recsTest = currentFilteredRecords.filter(r => r.bucket_afv === b);
           const recsL4W = l4wBaselineRecords.filter(r => r.bucket_afv === b);
           const aggTest = calculateMetricsForSet(recsTest);
           const aggL4W = calculateMetricsForSet(recsL4W);
-          
           testCrTotalData.push(aggTest.contact_rate);
           l4wCrTotalData.push(aggL4W.contact_rate);
-          testCrCashData.push(aggTest.contact_rate_cash);
-          l4wCrCashData.push(aggL4W.contact_rate_cash);
+
+          // Cash: IGNORA el filtro de pago (se calcula sobre universo total de órdenes Cash)
+          const recsCashTest = currentSplitTestRecords.filter(r => r.bucket_afv === b);
+          const recsCashL4W = currentSplitL4wRecords.filter(r => r.bucket_afv === b);
+          const aggCashTest = calculateMetricsForSet(recsCashTest);
+          const aggCashL4W = calculateMetricsForSet(recsCashL4W);
+          testCrCashData.push(aggCashTest.contact_rate_cash);
+          l4wCrCashData.push(aggCashL4W.contact_rate_cash);
         });
 
         // 1. % CR Total (Test) - Línea continua roja
