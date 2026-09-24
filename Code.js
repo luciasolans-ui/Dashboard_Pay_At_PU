@@ -5,7 +5,7 @@
 
 function doGet() {
   return HtmlService.createHtmlOutputFromFile('Pay_at_PU')
-    .setTitle('Pay at Pickup - Capacidad, Stacking & Split Orders')
+    .setTitle('Pay at Pickup - Capacidad, Stacking, Split Orders & Contact Rate')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
@@ -13,13 +13,24 @@ function doGet() {
 /**
  * Función de actualización diaria programada.
  * Consulta la tabla oficial automatizada `peya-argentina.automated_tables_reports.pay_at_pu`
- * (actualizada a las 10:55 AM) para consolidar los datos del experimento.
+ * (actualizada a las 10:55 AM) y cruza con `pandacare_chats` para consolidar los datos del experimento.
  */
 function updateDashboardDataDaily() {
   console.log('Iniciando actualización diaria desde peya-argentina.automated_tables_reports.pay_at_pu...');
   
   const projectId = 'peya-argentina';
   const query = `
+    WITH RiderChatsCOD AS (
+      SELECT
+        order_id,
+        COUNT(DISTINCT chat_id) AS total_cod_chats
+      FROM \`peya-data-origins-pro.cl_gcc_service.pandacare_chats\`
+      WHERE created_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 35 DAY)
+        AND global_entity_id = 'PY_AR'
+        AND stakeholder = 'Rider'
+        AND contact_reason_l3 = 'COD issue'
+      GROUP BY 1
+    )
     SELECT
       p.*,
       CASE WHEN b.is_split = TRUE THEN 1.0 ELSE 0.0 END AS is_split,
@@ -32,11 +43,14 @@ function updateDashboardDataDaily() {
         WHEN p.order_value < 50000 THEN '05. 40k - 50k'
         WHEN p.order_value < 60000 THEN '06. 50k - 60k'
         ELSE '07. 60k+'
-      END AS bucket_afv
+      END AS bucket_afv,
+      CASE WHEN c.order_id IS NOT NULL THEN 1.0 ELSE 0.0 END AS is_cod_chat
     FROM \`peya-argentina.automated_tables_reports.pay_at_pu\` AS p
     LEFT JOIN \`peya-argentina.automated_tables_reports.DETALLE_ORDENES_rider_Performance\` AS b
       ON b.order_code = p.order_code
-      AND b.date = p.date;
+      AND b.date = p.date
+    LEFT JOIN RiderChatsCOD AS c
+      ON c.order_id = p.order_code;
   `;
 
   try {
@@ -65,7 +79,6 @@ function updateDashboardDataDaily() {
  * garantizando que corra inmediatamente después de que finalice la actualización de la tabla a las 10:55 AM.
  */
 function createDailyTrigger() {
-  // Elimina triggers previos de la misma función para evitar duplicados
   const existingTriggers = ScriptApp.getProjectTriggers();
   existingTriggers.forEach(trigger => {
     if (trigger.getHandlerFunction() === 'updateDashboardDataDaily') {
@@ -73,7 +86,6 @@ function createDailyTrigger() {
     }
   });
 
-  // Crea el trigger diario a las 11:00 AM
   ScriptApp.newTrigger('updateDashboardDataDaily')
     .timeBased()
     .everyDays(1)
