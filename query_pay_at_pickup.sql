@@ -1,114 +1,228 @@
--- ==============================================================================
--- QUERY OFICIAL PAY AT PICKUP: AGREGACIÓN DE SPLIT ORDERS, CONTACT RATE (COD) & KEY METRICS
--- Proyecto: peya-argentina
--- Tabla Base: `peya-argentina.automated_tables_reports.pay_at_pu` (actualizada diariamente a las 10:55 AM)
--- Cruces:
---   - `peya-argentina.automated_tables_reports.DETALLE_ORDENES_rider_Performance` (is_split, deliveries_netos)
---   - `peya-data-origins-pro.cl_gcc_service.pandacare_chats` (Contact Rate Rider - COD issue / falta de efectivo)
--- ==============================================================================
-
 DECLARE dInf DATE;
 DECLARE dSup DATE;
-SET dInf = '2026-08-19'; -- Período completo (Baseline 28d + Test)
-SET dSup = CURRENT_DATE(); -- Fecha actual
+SET dInf = '2026-09-16'; -- Fecha oficial de inicio del test (Miércoles 16/Sep)
+SET dSup = CURRENT_DATE(); -- Fecha de fin (incluida)
 
-WITH RiderChatsCOD AS (
+WITH Deliveries AS (
+  SELECT 
+    o.platform_order_code AS order_code,
+    MAX(d.stacked_deliveries) AS stacked_deliveries,
+    vendor.vertical_type,
+    MAX(o.capacity) AS capacity,
+    MAX(o.original_scheduled_pickup_at) AS commited_pickup_at,
+    MAX(o.created_at) AS creation_time,
+    MAX(o.timings.at_vendor_time) AS at_vendor_time,
+  FROM `fulfillment-dwh-production.curated_data_shared.orders` AS o
+  LEFT JOIN UNNEST(deliveries) AS d
+  WHERE
+    -- Se extrae desde 28 días antes de dInf para cubrir el Baseline L4W completo (inclusive)
+    DATETIME(o.created_at, o.timezone) >= DATETIME(DATE_SUB(dInf, INTERVAL 28 DAY))
+    AND DATETIME(o.created_at, o.timezone) <= DATETIME(dSup)
+    AND o.created_date BETWEEN DATE_SUB(dInf, INTERVAL 29 DAY) AND dSup + 1
+    AND o.country_code = 'ar'
+  GROUP BY ALL
+),
+
+CPO AS (
+  SELECT
+    country_code,
+    platform_order_code AS order_code,
+    SUM(basic_payment_per_km_pu_lc) AS pago_distancia_pu,
+    SUM(basic_payment_per_del_pud_lc) AS pago_pu,
+    SUM(basic_payment_per_km_do_lc) AS pago_distancia_do,
+    SUM(basic_payment_per_del_ndo_lc) AS pago_do,
+    SUM(basic_cpo_lc) AS pago_base_base,
+    SUM(scoring_cpo_lc) AS pago_scoring,
+    (SUM(basic_cpo_lc) + SUM(scoring_cpo_lc)) AS pago_base,
+  FROM `peya-datamarts-pro.dm_cpo.overall_cpo`
+  WHERE
+    created_date >= DATE_SUB(dInf, INTERVAL 28 DAY)
+    AND created_date <= dSup
+    AND country_code = 'ar'
+  GROUP BY ALL
+),
+
+Stacking AS (
+  SELECT
+    -- SAFE_CAST en los joins para garantizar alineación estricta de tipos de datos en BigQuery
+    SAFE_CAST(order_code AS STRING) AS order_code,
+    rank_delivery,
+    Good_stacking,
+    stacking_format,
+    stack_group,
+    dif_PU_Times AS delta_PU
+  FROM `peya-argentina.automated_tables_reports.stacking_groups_dataset`
+  WHERE created_date BETWEEN DATE_SUB(dInf, INTERVAL 29 DAY) AND dSup + 1
+  GROUP BY ALL
+),
+
+LateOrders AS (
+  SELECT
+    o.order_code,
+    -- 1. OL Operativo > 10': Retraso > 10 minutos (600 seg) respecto a la estimación operativa interna de Hurrier
+    CASE WHEN o.rider.order_status = 'completed' AND o.rider.timings.order_delay > 600 THEN 1 ELSE 0 END AS is_ol,
+    -- 2. OL Customer Facing (CF): Entrega completada con tiempo real superior a la promesa máxima informada al consumidor en la app (actual_delivery_time > PDT Max)
+    CASE WHEN o.rider.order_status = 'completed' AND (o.rider.timings.actual_delivery_time > fo.promiseddeliverytime.maxMinutes * 60) THEN 1 ELSE 0 END AS is_ol_cf
+  FROM `peya-data-origins-pro.cl_hurrier.orders_v2` AS o
+  LEFT JOIN `peya-bi-tools-pro.il_core.fact_orders` AS fo
+    ON CAST(fo.order_id AS STRING) = o.order_code
+    AND fo.registered_date >= DATE_SUB(dInf, INTERVAL 28 DAY)
+    AND fo.registered_date <= dSup
+    AND fo.country_id = 3
+  WHERE o.created_date >= DATE_SUB(dInf, INTERVAL 28 DAY)
+    AND o.created_date <= dSup
+    AND o.entity.id = 'PY_AR' -- Mapeo oficial de Argentina para orders_v2
+),
+
+RiderChatsCOD AS (
   SELECT
     order_id,
     COUNT(DISTINCT chat_id) AS total_cod_chats
   FROM `peya-data-origins-pro.cl_gcc_service.pandacare_chats`
-  WHERE created_date BETWEEN dInf - 1 AND dSup + 1
-    AND created_date_localtime >= dInf
+  WHERE created_date BETWEEN DATE_SUB(dInf, INTERVAL 29 DAY) AND dSup + 1
+    AND created_date_localtime >= DATE_SUB(dInf, INTERVAL 28 DAY)
     AND created_date_localtime <= dSup
     AND global_entity_id = 'PY_AR'
     AND stakeholder = 'Rider'
     AND contact_reason_l3 = 'COD issue'
   GROUP BY 1
-),
-
-RawOrders AS (
-  SELECT
-    p.date,
-    CASE 
-      WHEN LOWER(TRIM(p.city_name)) IN ('rafaela', 'san salvador de jujuy', 'jujuy') THEN 'Jujuy + Rafaela'
-      ELSE 'Otras ciudades'
-    END AS city_group,
-    p.city_name,
-    CASE 
-      WHEN LOWER(TRIM(p.vertical)) = 'restaurant' OR LOWER(TRIM(p.vertical_type)) LIKE '%restaurant%' THEN 'restaurant'
-      ELSE 'non-restaurant'
-    END AS vertical_group,
-    CASE 
-      WHEN p.metodo_pago = 'Cash_orders' OR LOWER(p.metodo_pago) LIKE '%cash%' THEN 'cash'
-      ELSE 'online + COD'
-    END AS pago_group,
-    CASE 
-      WHEN p.metodo_pago = 'Cash_orders' OR LOWER(p.metodo_pago) LIKE '%cash%' THEN 1
-      ELSE 0
-    END AS is_cash,
-    CASE
-      WHEN p.order_value < 10000 THEN '01. 0 - 10k'
-      WHEN p.order_value < 20000 THEN '02. 10k - 20k'
-      WHEN p.order_value < 30000 THEN '03. 20k - 30k'
-      WHEN p.order_value < 40000 THEN '04. 30k - 40k'
-      WHEN p.order_value < 50000 THEN '05. 40k - 50k'
-      WHEN p.order_value < 60000 THEN '06. 50k - 60k'
-      ELSE '07. 60k+'
-    END AS bucket_afv,
-    CASE WHEN b.is_split = TRUE THEN 1 ELSE 0 END AS is_split,
-    COALESCE(b.deliveries_netos, 1) AS deliveries_netos,
-    p.order_completed,
-    p.order_cancelled,
-    p.DT AS dt,
-    p.is_seamless,
-    p.orders_count_seamless,
-    p.is_ol,
-    p.is_ol_cf,
-    CASE WHEN c.order_id IS NOT NULL THEN 1 ELSE 0 END AS has_cod_chat,
-    p.order_code
-  FROM `peya-argentina.automated_tables_reports.pay_at_pu` AS p
-  LEFT JOIN `peya-argentina.automated_tables_reports.DETALLE_ORDENES_rider_Performance` AS b
-    ON b.order_code = p.order_code
-    AND b.date = p.date
-  LEFT JOIN RiderChatsCOD AS c
-    ON c.order_id = p.order_code
-  WHERE p.date >= dInf AND p.date <= dSup
 )
 
 SELECT
-  date,
-  city_name,
-  city_group,
-  vertical_group,
-  pago_group,
-  bucket_afv AS bucket,
-  COUNT(DISTINCT order_code) AS total_orders,
-  COUNT(DISTINCT CASE WHEN order_completed = 1 THEN order_code END) AS completed_orders,
-  COUNT(DISTINCT CASE WHEN order_cancelled = 1 THEN order_code END) AS cancelled_orders,
-  
-  -- Split Orders (estrictamente a nivel órdenes y entregas)
-  COUNT(DISTINCT CASE WHEN is_split = 1 THEN order_code END) AS split_orders,
-  SUM(is_split) AS sum_split_deliveries,
-  SUM(deliveries_netos) AS sum_deliveries_netos,
-  
-  -- Split Orders Cash
-  COUNT(DISTINCT CASE WHEN is_cash = 1 THEN order_code END) AS cash_orders,
-  COUNT(DISTINCT CASE WHEN is_cash = 1 AND is_split = 1 THEN order_code END) AS cash_split_orders,
-  
-  -- Contact Rate: Chats de Rider por falta de efectivo / problema COD
-  COUNT(DISTINCT CASE WHEN has_cod_chat = 1 THEN order_code END) AS cod_contact_orders,
-  COUNT(DISTINCT CASE WHEN is_cash = 1 AND has_cod_chat = 1 THEN order_code END) AS cash_cod_contact_orders,
-  
-  -- Tasas de Contact Rate calculadas
-  SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN has_cod_chat = 1 THEN order_code END), COUNT(DISTINCT order_code)) * 100 AS contact_rate_cod_pct,
-  SAFE_DIVIDE(COUNT(DISTINCT CASE WHEN is_cash = 1 AND has_cod_chat = 1 THEN order_code END), COUNT(DISTINCT CASE WHEN is_cash = 1 THEN order_code END)) * 100 AS contact_rate_cod_cash_pct,
-  
-  -- Key Operations & Quality Metrics
-  COUNT(DISTINCT CASE WHEN is_ol = 1 THEN order_code END) AS ol_orders,
-  COUNT(DISTINCT CASE WHEN is_ol_cf = 1 THEN order_code END) AS ol_cf_orders,
-  COUNT(DISTINCT CASE WHEN is_seamless = '1' THEN order_code END) AS seamless_orders,
-  COUNT(DISTINCT CASE WHEN orders_count_seamless IS NOT NULL THEN order_code END) AS seamless_base_orders,
-  AVG(dt) AS avg_dt
-FROM RawOrders
-GROUP BY ALL
-ORDER BY date DESC, city_name, bucket;
+  b.date,
+  b.date_time,
+  b.hour,
+  b.rider_id,
+  b.compliance_segment,
+  b.regional_segment,
+  b.batch,
+  b.order_code,
+  CASE WHEN vertical IN ('Courier','Courier Business') THEN NULL ELSE b.order_code END AS orders_count_seamless,
+  b.partner_name,
+  b.franchise_name,
+  b.vertical,
+  d.vertical_type,
+  CASE WHEN reject_message = 'CONFIRMED' THEN b.is_stacked ELSE NULL END AS is_stacked,
+
+  -- COALESCE para evitar nulos y asegurar el procesamiento correcto de los niveles de stacking (0, 2, 3+)
+  COALESCE(CASE WHEN (d.stacked_deliveries IS NULL OR d.stacked_deliveries = 0) THEN 0 ELSE d.stacked_deliveries + 1 END, 0) AS stacked_deliveries,
+  d.capacity,
+  b.city_name,
+  b.cancellation_reason,
+  b.reject_message,
+  CASE WHEN b.reject_message NOT IN ('CONFIRMED') THEN 1 ELSE 0 END AS order_cancelled,
+  CASE WHEN b.reject_message IN ('CONFIRMED') THEN 1 ELSE 0 END AS order_completed,
+  b.accionador_level1,
+  b.order_value,
+  b.metodo_pago,
+  b.mean_delay,
+  b.bucket_MD,
+  b.is_pin_validation,
+  b.last_state_anterior,
+  FORMAT_DATETIME('%Y-%m-%d %H:%M:%S', DATETIME(d.commited_pickup_at, 'America/Argentina/Buenos_Aires')) AS commited_pickup_at,
+  CAST(d.at_vendor_time AS FLOAT64) AS at_vendor_time,
+  b.actual_delivery_time AS DT,
+
+  -- Commitment Timing (TIMESTAMP_DIFF)
+  TIMESTAMP_DIFF(d.commited_pickup_at, d.creation_time, MINUTE) AS commitment_time_mins,
+
+  -- Undispatch
+  b.Orders_Notified AS notificadas,
+  b.decline,
+  b.not_seen,
+  b.ignore_,
+  (b.decline + b.not_seen + b.ignore_) AS undispatchs_pre,
+  b.order_issue,
+  b.late_prep,
+  b.accident,
+  b.equipment_issue,
+  (b.courier_did_not_hit_pu + b.pu_nogps_delayed + b.not_moving_pu + b.waiting_at_pu) AS ICE_undispatchs,
+  b.dispatcher_undispatchs,
+  (b.order_issue + b.late_prep + b.accident + b.equipment_issue + b.courier_did_not_hit_pu + b.pu_nogps_delayed + b.not_moving_pu + b.waiting_at_pu + b.dispatcher_undispatchs) AS undispatchs_post,
+  -- Unified Total Undispatches
+  (b.decline + b.not_seen + b.ignore_ + b.order_issue + b.late_prep + b.accident + b.equipment_issue + b.courier_did_not_hit_pu + b.pu_nogps_delayed + b.not_moving_pu + b.waiting_at_pu + b.dispatcher_undispatchs) AS undispatchs_total,
+
+  -- SEAMLESS (Se mantienen separados e independientes session y modified de origen)
+  b.Seamless_is_slow_order,
+  b.Seamless_is_late_order,
+  b.Seamless_is_session_order,
+  b.Seamless_is_rejected_order,
+  b.Seamless_is_modified_order,
+  b.Seamless_is_forced_order,
+  CASE WHEN b.Seamless_seamless_order = TRUE THEN b.order_code ELSE NULL END AS is_seamless,
+
+  -- Food Delivery Accuracy (FDA) Fields & Explicit Formula Calculation
+  b.FDA_wastage_amount_num,
+  b.FDA_recupero_wastage_amount_num,
+  b.FDA_refund_amount_num,
+  b.FDA_recupero_refund_amount_num,
+  b.FDA_compensation_amount_num,
+  -- Formula explícita de FDA: wastage - recupero_wastage + refund - recupero_refund + compensation
+  (
+    COALESCE(b.FDA_wastage_amount_num, 0) - COALESCE(b.FDA_recupero_wastage_amount_num, 0) +
+    COALESCE(b.FDA_refund_amount_num, 0) - COALESCE(b.FDA_recupero_refund_amount_num, 0) +
+    COALESCE(b.FDA_compensation_amount_num, 0)
+  ) AS FDA_cost_amount,
+
+  -- Cost Per Order (CPO) Fields
+  cpo.pago_distancia_pu,
+  cpo.pago_pu,
+  cpo.pago_distancia_do,
+  cpo.pago_do,
+  cpo.pago_base_base,
+  cpo.pago_scoring,
+  cpo.pago_base,
+
+  -- Inaccuracy DWH Columns
+  IFNULL(b.missing_item,0) AS missing_item,
+  IFNULL(b.wrong_item,0) AS wrong_item,
+  IFNULL(b.wrong_order,0) AS wrong_order,
+  IFNULL(b.food_quality,0) AS food_quality,
+  IFNULL(b.inac_num,0) AS inac_num,
+
+  -- Stacking Groups Joined Fields (Casting STRING de alineación en DWH)
+  stack.Good_stacking,
+  stack.rank_delivery,
+  stack.stacking_format,
+  stack.stack_group,
+  stack.delta_PU,
+
+  -- Order Late Variables (OL > 10' y OL CF)
+  COALESCE(lo.is_ol, 0) AS is_ol,
+  COALESCE(lo.is_ol_cf, 0) AS is_ol_cf,
+
+  -- Split Orders Fields
+  CASE WHEN b.is_split = TRUE THEN 1.0 ELSE 0.0 END AS is_split,
+  COALESCE(b.deliveries_netos, 1) AS deliveries_netos,
+  CASE
+    WHEN b.order_value < 10000 THEN '01. 0 - 10k'
+    WHEN b.order_value < 20000 THEN '02. 10k - 20k'
+    WHEN b.order_value < 30000 THEN '03. 20k - 30k'
+    WHEN b.order_value < 40000 THEN '04. 30k - 40k'
+    WHEN b.order_value < 50000 THEN '05. 40k - 50k'
+    WHEN b.order_value < 60000 THEN '06. 50k - 60k'
+    ELSE '07. 60k+'
+  END AS bucket_afv,
+
+  -- Contact Rate Rider COD
+  CASE WHEN c.order_id IS NOT NULL THEN 1.0 ELSE 0.0 END AS has_cod_chat
+
+FROM `peya-argentina.automated_tables_reports.DETALLE_ORDENES_rider_Performance` AS b
+LEFT JOIN Deliveries AS d ON d.order_code = b.order_code
+LEFT JOIN CPO AS cpo ON cpo.order_code = b.order_code
+LEFT JOIN Stacking AS stack ON SAFE_CAST(b.order_code AS STRING) = SAFE_CAST(stack.order_code AS STRING)
+LEFT JOIN LateOrders AS lo ON SAFE_CAST(b.order_code AS STRING) = SAFE_CAST(lo.order_code AS STRING)
+LEFT JOIN RiderChatsCOD AS c ON c.order_id = b.order_code
+WHERE
+  -- Se amplía la partición temporal en la consulta principal para incluir las últimas 4 semanas de baseline (inclusive)     
+  date >= DATE_SUB(dInf, INTERVAL 28 DAY) AND date <= dSup
+
+  -- FILTRO DE CIUDADES OFICIALES DE TEST:
+  AND city_name IN ('Rafaela','San salvador de jujuy')
+
+  -- EXCLUSIONES HORARIAS:
+  -- Excluir Sábado 12 de Septiembre de 2026 entre las 21:00 hs y las 23:59 hs (inclusive)
+  AND NOT (date = '2026-09-12' AND CAST(b.hour AS INT64) BETWEEN 21 AND 23)
+  -- Excluir Domingo 13 de Septiembre de 2026 entre las 00:00 hs y las 03:00 hs (inclusive)
+  AND NOT (date = '2026-09-13' AND CAST(b.hour AS INT64) BETWEEN 0 AND 3)
+GROUP BY ALL;
