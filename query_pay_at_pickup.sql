@@ -86,6 +86,15 @@ RiderChatsCOD AS (
     AND stakeholder = 'Rider'
     AND contact_reason_l3 = 'COD issue'
   GROUP BY 1
+),
+
+LogisticsOrders AS (
+  SELECT
+    platform_order_code AS order_code,
+    timings.avoidable_wait_time
+  FROM `peya-bi-tools-pro.il_logistics.fact_logistic_orders`
+  WHERE created_date BETWEEN DATE_SUB(dInf, INTERVAL 29 DAY) AND dSup + 1
+    AND country_code = 'ar'
 )
 
 SELECT
@@ -205,7 +214,12 @@ SELECT
   END AS bucket_afv,
 
   -- Contact Rate Rider COD
-  CASE WHEN c.order_id IS NOT NULL THEN 1.0 ELSE 0.0 END AS has_cod_chat
+  CASE WHEN c.order_id IS NOT NULL THEN 1.0 ELSE 0.0 END AS has_cod_chat,
+
+  -- Avoidable Wait Time (AWT > 5 min / > 300 segundos)
+  log.avoidable_wait_time,
+  CASE WHEN log.avoidable_wait_time > 300 THEN 1 ELSE 0 END AS is_awt_gt_5,
+  CASE WHEN log.avoidable_wait_time IS NOT NULL THEN 1 ELSE 0 END AS has_awt
 
 FROM `peya-argentina.automated_tables_reports.DETALLE_ORDENES_rider_Performance` AS b
 LEFT JOIN Deliveries AS d ON d.order_code = b.order_code
@@ -213,6 +227,7 @@ LEFT JOIN CPO AS cpo ON cpo.order_code = b.order_code
 LEFT JOIN Stacking AS stack ON SAFE_CAST(b.order_code AS STRING) = SAFE_CAST(stack.order_code AS STRING)
 LEFT JOIN LateOrders AS lo ON SAFE_CAST(b.order_code AS STRING) = SAFE_CAST(lo.order_code AS STRING)
 LEFT JOIN RiderChatsCOD AS c ON c.order_id = b.order_code
+LEFT JOIN LogisticsOrders AS log ON log.order_code = b.order_code
 WHERE
   -- Se amplía la partición temporal en la consulta principal para incluir las últimas 4 semanas de baseline (inclusive)     
   date >= DATE_SUB(dInf, INTERVAL 28 DAY) AND date <= dSup
