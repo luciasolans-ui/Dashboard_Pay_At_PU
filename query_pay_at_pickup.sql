@@ -74,17 +74,17 @@ LateOrders AS (
     AND o.entity.id = 'PY_AR' -- Mapeo oficial de Argentina para orders_v2
 ),
 
-RiderChatsCOD AS (
+RiderChats AS (
   SELECT
     order_id,
-    COUNT(DISTINCT chat_id) AS total_cod_chats
+    COUNT(DISTINCT chat_id) AS total_rider_chats,
+    COUNT(DISTINCT CASE WHEN contact_reason_l3 = 'COD issue' THEN chat_id END) AS total_cod_chats
   FROM `peya-data-origins-pro.cl_gcc_service.pandacare_chats`
   WHERE created_date BETWEEN DATE_SUB(dInf, INTERVAL 29 DAY) AND dSup + 1
     AND created_date_localtime >= DATE_SUB(dInf, INTERVAL 28 DAY)
     AND created_date_localtime <= dSup
     AND global_entity_id = 'PY_AR'
     AND stakeholder = 'Rider'
-    AND contact_reason_l3 = 'COD issue'
   GROUP BY 1
 ),
 
@@ -132,10 +132,8 @@ SELECT
   CAST(d.at_vendor_time AS FLOAT64) AS at_vendor_time,
   b.actual_delivery_time AS DT,
 
-  -- Commitment Timing (TIMESTAMP_DIFF)
   TIMESTAMP_DIFF(d.commited_pickup_at, d.creation_time, MINUTE) AS commitment_time_mins,
 
-  -- Undispatch
   b.Orders_Notified AS notificadas,
   b.decline,
   b.not_seen,
@@ -213,8 +211,11 @@ SELECT
     ELSE '07. 60k+'
   END AS bucket_afv,
 
-  -- Contact Rate Rider COD
-  CASE WHEN c.order_id IS NOT NULL THEN 1.0 ELSE 0.0 END AS has_cod_chat,
+  -- Contact Rate Metrics:
+  -- 1. Contact Rate General: Cantidad de veces que los riders establecieron contacto con soporte (cualquier motivo)
+  COALESCE(c.total_rider_chats, 0) AS rider_chats_total,
+  -- 2. Contact Rate Cash: Motivo COD issue (caja insuficiente / falta de efectivo)
+  CASE WHEN c.total_cod_chats > 0 THEN 1.0 ELSE 0.0 END AS has_cod_chat,
 
   -- Avoidable Wait Time (AWT > 5 min / > 300 segundos)
   log.avoidable_wait_time,
@@ -226,7 +227,7 @@ LEFT JOIN Deliveries AS d ON d.order_code = b.order_code
 LEFT JOIN CPO AS cpo ON cpo.order_code = b.order_code
 LEFT JOIN Stacking AS stack ON SAFE_CAST(b.order_code AS STRING) = SAFE_CAST(stack.order_code AS STRING)
 LEFT JOIN LateOrders AS lo ON SAFE_CAST(b.order_code AS STRING) = SAFE_CAST(lo.order_code AS STRING)
-LEFT JOIN RiderChatsCOD AS c ON c.order_id = b.order_code
+LEFT JOIN RiderChats AS c ON c.order_id = b.order_code
 LEFT JOIN LogisticsOrders AS log ON log.order_code = b.order_code
 WHERE
   -- Se amplía la partición temporal en la consulta principal para incluir las últimas 4 semanas de baseline (inclusive)     
