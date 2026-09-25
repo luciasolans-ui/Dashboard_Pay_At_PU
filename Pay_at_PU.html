@@ -242,13 +242,13 @@
         </div>
       </div>
 
-      <!-- SECCIÓN 1: SCORECARD / KPI CARDS (9 COLUMNAS) -->
+      <!-- SECCIÓN 1: SCORECARD / KPI CARDS (2 FILAS) -->
       <div>
         <h3 class="text-xs font-extrabold text-peya-red uppercase tracking-widest mb-3">
           Métricas de Cabecera (Test vs Last 4 Weeks Match)
         </h3>
         
-        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-3 text-medium">
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5 text-medium">
           
           <!-- Card 1: Completed Orders -->
           <div class="bg-white rounded-2xl p-4 border border-peya-grey shadow-sm flex flex-col justify-between">
@@ -290,37 +290,17 @@
             <div id="kpi-fail-rate-var" class="mt-1"></div>
           </div>
 
-          <!-- Card 5: OL Operativo (> 10 min) -->
+          <!-- Card 5: DT (Delivery Time) -->
           <div class="bg-white rounded-2xl p-4 border border-peya-grey shadow-sm flex flex-col justify-between">
-            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">OL Operativo (&gt; 10 min)</span>
+            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Delivery Time (DT)</span>
             <div class="my-2">
-              <span id="kpi-ol-test" class="text-2xl font-extrabold text-peya-navy block">--</span>
-              <span id="kpi-ol-l4w" class="text-[11px] text-slate-400 font-medium">L4W: --</span>
+              <span id="kpi-dt-test" class="text-2xl font-extrabold text-peya-navy block">--</span>
+              <span id="kpi-dt-l4w" class="text-[11px] text-slate-400 font-medium">L4W: --</span>
             </div>
-            <div id="kpi-ol-var" class="mt-1"></div>
+            <div id="kpi-dt-var" class="mt-1"></div>
           </div>
 
-          <!-- Card 6: OL CF (Customer Facing) -->
-          <div class="bg-white rounded-2xl p-4 border border-peya-grey shadow-sm flex flex-col justify-between">
-            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">OL CF (Customer Facing)</span>
-            <div class="my-2">
-              <span id="kpi-olcf-test" class="text-2xl font-extrabold text-peya-navy block">--</span>
-              <span id="kpi-olcf-l4w" class="text-[11px] text-slate-400 font-medium">L4W: --</span>
-            </div>
-            <div id="kpi-olcf-var" class="mt-1"></div>
-          </div>
-
-          <!-- Card 7: Undispatched Total -->
-          <div class="bg-white rounded-2xl p-4 border border-peya-grey shadow-sm flex flex-col justify-between">
-            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Undispatched Total</span>
-            <div class="my-2">
-              <span id="kpi-undispatched-test" class="text-2xl font-extrabold text-peya-navy block">--</span>
-              <span id="kpi-undispatched-l4w" class="text-[11px] text-slate-400 font-medium">L4W: --</span>
-            </div>
-            <div id="kpi-undispatched-var" class="mt-1"></div>
-          </div>
-
-          <!-- Card 8: CPO Base Base -->
+          <!-- Card 6: CPO Base Base -->
           <div class="bg-white rounded-2xl p-4 border border-peya-grey shadow-sm flex flex-col justify-between">
             <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">CPO Base Base</span>
             <div class="my-2">
@@ -330,14 +310,54 @@
             <div id="kpi-cpo-var" class="mt-1"></div>
           </div>
 
-          <!-- Card 9: DT (Delivery Time) -->
+          <!-- Card 7: OL Operativo (> 10 min) -->
           <div class="bg-white rounded-2xl p-4 border border-peya-grey shadow-sm flex flex-col justify-between">
-            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Delivery Time (DT)</span>
+            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">OL Operativo (&gt; 10 min)</span>
             <div class="my-2">
-              <span id="kpi-dt-test" class="text-2xl font-extrabold text-peya-navy block">--</span>
-              <span id="kpi-dt-l4w" class="text-[11px] text-slate-400 font-medium">L4W: --</span>
+              <span id="kpi-ol-test" class="text-2xl font-extrabold text-peya-navy block">--</span>
+              <span id="kpi-ol-l4w" class="text-[11px] text-slate-400 font-medium">L4W: --</span>
             </div>
-            <div id="kpi-dt-var" class="mt-1"></div>
+            <div id="kpi-ol-var" class="mt-1"></div>
+          </div>
+
+          <!-- Card 8: OL CF (Customer Facing) -->
+          <div class="bg-white rounded-2xl p-4 border border-peya-grey shadow-sm flex flex-col justify-between">
+            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">OL CF (Customer Facing)</span>
+            <div class="my-2">
+              <span id="kpi-olcf-test" class="text-2xl font-extrabold text-peya-navy block">--</span>
+              <span id="kpi-olcf-l4w" class="text-[11px] text-slate-400 font-medium">L4W: --</span>
+            </div>
+            <div id="kpi-olcf-var" class="mt-1"></div>
+          </div>
+
+          <!-- Card 9: Undispatched Total -->
+          <div class="bg-white rounded-2xl p-4 border border-peya-grey shadow-sm flex flex-col justify-between">
+            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Undispatched Total</span>
+            <div class="my-2">
+              <span id="kpi-undispatched-test" class="text-2xl font-extrabold text-peya-navy block">--</span>
+              <span id="kpi-undispatched-l4w" class="text-[11px] text-slate-400 font-medium">L4W: --</span>
+            </div>
+            <div id="kpi-undispatched-var" class="mt-1"></div>
+          </div>
+
+          <!-- Card 10: AWT > 5 min -->
+          <div class="bg-white rounded-2xl p-4 border border-peya-grey shadow-sm flex flex-col justify-between">
+            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">AWT &gt; 5 min (Evitable)</span>
+            <div class="my-2">
+              <span id="kpi-awt5-test" class="text-2xl font-extrabold text-peya-navy block">--</span>
+              <span id="kpi-awt5-l4w" class="text-[11px] text-slate-400 font-medium">L4W: --</span>
+            </div>
+            <div id="kpi-awt5-var" class="mt-1"></div>
+          </div>
+
+          <!-- Card 11: Contact Rate Total (CR%) -->
+          <div class="bg-white rounded-2xl p-4 border border-peya-grey shadow-sm flex flex-col justify-between">
+            <span class="text-slate-400 text-[10px] font-bold uppercase tracking-wider">Contact Rate Total (CR%)</span>
+            <div class="my-2">
+              <span id="kpi-cr-test" class="text-2xl font-extrabold text-peya-navy block">--</span>
+              <span id="kpi-cr-l4w" class="text-[11px] text-slate-400 font-medium">L4W: --</span>
+            </div>
+            <div id="kpi-cr-var" class="mt-1"></div>
           </div>
 
         </div>
@@ -1347,7 +1367,9 @@
         'cpo': { test: testAgg.cpo, l4w: l4wAgg.cpo, type: 'currency', better: false, cardId: 'kpi-cpo' },
         'dt': { test: testAgg.dt, l4w: l4wAgg.dt, type: 'duration', better: false, cardId: 'kpi-dt' },
         'ol': { test: testAgg.ol, l4w: l4wAgg.ol, type: 'percentage', better: false, cardId: 'kpi-ol' },
-        'olcf': { test: testAgg.ol_cf, l4w: l4wAgg.ol_cf, type: 'percentage', better: false, cardId: 'kpi-olcf' }
+        'olcf': { test: testAgg.ol_cf, l4w: l4wAgg.ol_cf, type: 'percentage', better: false, cardId: 'kpi-olcf' },
+        'awt5': { test: testAgg.awt5, l4w: l4wAgg.awt5, type: 'percentage', better: false, cardId: 'kpi-awt5' },
+        'cr': { test: testAgg.contact_rate, l4w: l4wAgg.contact_rate, type: 'percentage', better: false, cardId: 'kpi-cr' }
       };
 
       Object.keys(mappings).forEach(key => {
